@@ -15,8 +15,16 @@ from NuRadioReco.framework.parameters import electricFieldParameters as efp
 
 logger = logging.getLogger('NuRadioReco.voltageToEfieldConverter')
 
+from NuRadioMC.utilities import medium
+ice_model = medium.get_ice_model("greenland_simple")
+#ice_model = medium.get_ice_model("greenland_poly5")
 
-def get_array_of_channels(station, use_channels, det, zenith, azimuth,
+import os
+rays_loc = os.getenv('RNO_G_RAYS_H5_FILE')
+import rnog_solar.reconstruction.rayReader as rr
+
+
+def get_array_of_channels(station, use_channels, det, zenith, azimuth, passband,
                           antenna_pattern_provider, time_domain=False, efield_position=None):
     """ Get the voltage traces and antenna factors for the electric field reconstruction.
 
@@ -67,20 +75,34 @@ def get_array_of_channels(station, use_channels, det, zenith, azimuth,
 
     station_id = station.get_id()
     site = det.get_site(station_id)
+    #load ray from zenith angle
+    with rr.Rays(rays_loc) as rays:
+        selected_ray, matched_angle = rays.get_ray_from_source_zenith(zenith)
+    
     for iCh, channel in enumerate(station.iter_channels(use_channels)):
         channel_id = channel.get_id()
 
         antenna_position = det.get_relative_position(station_id, channel_id)
-        # determine refractive index of signal propagation speed between antennas
-        refractive_index = ice.get_refractive_index(1, site)  # if signal comes from above, in-air propagation speed
+        
+        
+        #straight line propagation option for time delays between each antenna & E-field point
+        refractive_index = ice_model.get_index_of_refraction([0,0,1])
+        '''
         if station.is_cosmic_ray():
             if zenith > 0.5 * np.pi:
-                refractive_index = ice.get_refractive_index(antenna_position[2], site)  # if signal comes from below, use refractivity at antenna position
+                refractive_index = ice_model.get_index_of_refraction(antenna_position)
 
         if station.is_neutrino():
             refractive_index = ice.get_refractive_index(antenna_position[2], site)
+        
+        #time_shift = -geo_utl.get_time_delay_from_direction(zenith, azimuth, antenna_position - efield_position, n=refractive_index)
+        '''
+        
+        #traced rays
+        time_shift = rr.Rays.time_delay_from_ray(selected_ray, antenna_position, efield_position, source_pos=(zenith, azimuth))
 
-        time_shift = -geo_utl.get_time_delay_from_direction(zenith, azimuth, antenna_position - efield_position, n=refractive_index)
+        if np.isnan(time_shift):
+            print("NaN time shift for channel", channel_id)
 
         t_shifts.append(time_shift)
         t_min = channel.get_trace_start_time() + time_shift
@@ -89,8 +111,8 @@ def get_array_of_channels(station, use_channels, det, zenith, azimuth,
         t_maxs.append(t_max)
 
     # take the intersection of all channels
-    t_min = np.max(t_mins)
-    t_max = np.min(t_maxs)
+    t_min = np.nanmax(t_mins)
+    t_max = np.nanmin(t_maxs)
 
     n_samples = int((t_max - t_min) * channel.get_sampling_rate())
     if n_samples % 2:
@@ -120,13 +142,26 @@ def get_array_of_channels(station, use_channels, det, zenith, azimuth,
     for iCh, trace in enumerate(traces):
         V[iCh] = trace.get_frequency_spectrum()
 
-    efield_antenna_factor = signal_processing.get_efield_antenna_factor(
-        station, frequencies, use_channels, det, zenith, azimuth, antenna_pattern_provider)
 
+    H = signal_processing.get_efield_antenna_factor(station, frequencies, use_channels, det, zenith, azimuth, antenna_pattern_provider,selected_ray)
+    
+    
+    if passband is not None:
+        freq_mask = (frequencies >= passband[0]) & (frequencies <= passband[1])
+        V_bandpass = V.copy()
+        H_bandpass = H.copy()
+    
+        # Zero out-of-band frequencies
+        V_bandpass[:, ~freq_mask] = 0
+        H_bandpass[:, :, ~freq_mask] = 0
+
+        V = V_bandpass
+        H = H_bandpass
+    
     if time_domain:
-        return times, efield_antenna_factor, V, V_timedomain
+        return times, H, V, V_timedomain
 
-    return times, efield_antenna_factor, V
+    return times, H, V
 
 
 def stacked_lstsq(L, b, rcond=1e-10):
@@ -155,6 +190,7 @@ def stacked_lstsq(L, b, rcond=1e-10):
     x = np.einsum('...ji,...j->...i', v,
                   inv_s * np.einsum('...ji,...j->...i', u, b.conj()))
     return np.conj(x, x)
+    #return x
 
 
 class voltageToEfieldConverter:
@@ -181,7 +217,7 @@ class voltageToEfieldConverter:
         pass
 
     @register_run()
-    def run(self, evt, station, det, use_channels=None, use_MC_direction=False, force_Polarization=''):
+    def run(self, evt, station, det, passband=None,use_channels=None, use_MC_direction=False, force_Polarization=''):
         """
         run method. This function is executed for each event
 
@@ -190,8 +226,8 @@ class voltageToEfieldConverter:
         evt : `NuRadioReco.framework.event.Event`
         station : `NuRadioReco.framework.base_station.BaseStation`
         det : Detector object
-        use_channels: array of ints
-            The channel ids to use for the electric field reconstruction
+        use_channels: array of ints (default: [0, 1, 2, 3])
+            the channel ids to use for the electric field reconstruction
         use_MC_direction: bool, default: False
             If True uses zenith and azimuth direction from simulated station.
             Otherwise, uses reconstructed direction from station parameters.
@@ -200,15 +236,7 @@ class voltageToEfieldConverter:
             assuming the other is 0. Otherwise (default), reconstructs electric field for both eTheta and ePhi
         """
         if use_channels is None:
-            msg = ("No channels specified for electric field reconstruction. "
-                "Please provide `use_channels` argument to the voltageToEfieldConverter.")
-            logger.error(msg)
-            raise ValueError(msg)
-        elif len(use_channels) < 2 and not force_Polarization:
-            msg = ("At least two channels with orthogonal antenna response are needed for electric field reconstruction. "
-                "Please provide at least two channels in `use_channels` or set `force_Polarization` to 'eTheta' or 'ePhi'.")
-            logger.error(msg)
-            raise ValueError(msg)
+            use_channels = [0, 1, 2, 3]
 
         if use_MC_direction:
             zenith = station.get_sim_station()[stnp.zenith]
@@ -218,12 +246,12 @@ class voltageToEfieldConverter:
             zenith = station[stnp.zenith]
             azimuth = station[stnp.azimuth]
 
-        efield_position = np.mean([
+        efield_position = np.nanmean([
             det.get_relative_position(station.get_id(), channel_id)
             for channel_id in use_channels], axis=0)
 
         times, efield_antenna_factor, V = get_array_of_channels(
-            station, use_channels, det, zenith, azimuth, self.antenna_provider, efield_position=efield_position)
+            station, use_channels, det, zenith, azimuth, passband, self.antenna_provider, efield_position=efield_position)
 
         n_frequencies = len(V[0])
         denom = (efield_antenna_factor[0][0] * efield_antenna_factor[-1][1] -
@@ -238,6 +266,7 @@ class voltageToEfieldConverter:
             efield3_f[2:, mask] = np.moveaxis(stacked_lstsq(np.moveaxis(efield_antenna_factor[:, 1, mask], 1, 0)[:, :, np.newaxis], np.moveaxis(V[:, mask], 1, 0)), 0, 1)
         else:
             efield3_f[1:, mask] = np.moveaxis(stacked_lstsq(np.moveaxis(efield_antenna_factor[:, :, mask], 2, 0), np.moveaxis(V[:, mask], 1, 0)), 0, 1)
+
 
         electric_field = NuRadioReco.framework.electric_field.ElectricField(use_channels, efield_position)
         electric_field.set_frequency_spectrum(efield3_f, station.get_channel(use_channels[0]).get_sampling_rate())
