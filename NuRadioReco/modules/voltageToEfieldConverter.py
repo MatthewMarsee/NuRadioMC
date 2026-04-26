@@ -21,7 +21,7 @@ ice_model = medium.get_ice_model("greenland_simple")
 
 import os
 rays_loc = os.getenv('RNO_G_RAYS_H5_FILE')
-import rnog_solar.reconstruction.rayReader as rr
+import rayReader as rr
 
 
 def get_array_of_channels(station, use_channels, det, zenith, azimuth, passband,
