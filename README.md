@@ -13,19 +13,19 @@ The changes are made specifically in the following 3 scripts:
 * [2] NuRadioReco/utilities/signal_processing.py
 * [3] NuRadioReco/utilities/geometryUtilities.py
 
-[1]  In ```get_array_of_channels(...)```
+[1]  In ```get_array_of_channels(...)``` [Line](https://github.com/MatthewMarsee/NuRadioMC/blob/NuRadioMarsee/NuRadioReco/modules/voltageToEfieldConverter.py#L27)
 
 Replaced default generalized ice model (n(z<0) = 1.3) and straight-line propagation with a module that loads a previously generated ray to obtain proper arrival time delays between positions in the ice (typically antenna positions vs e-field location). This requires the ```rayReader``` class to use. I left a commented-out section as an alternative, that obtains the time delays from straight-line propagation using NuRadioMC's medium class. (Currently it is set to use a model of the greenlandic ice).
 
 In general, I also added an option for a passband when unfolding the antenna response from the voltage traces. This parameters is passed from the ```.run(...)``` method on line 220.
 
 
-[2]  In ```get_efield_antenna_factor(...)```
+[2]  In ```get_efield_antenna_factor(...)```[Line](https://github.com/MatthewMarsee/NuRadioMC/blob/NuRadioMarsee/NuRadioReco/utilities/signal_processing.py#L581)
 
 Modified in script [1] to accept a ray path as an argument. Originally the same function was used to obtain the fresnel coefficients and the refracted source zenith at each antenna, since n(z<0)=1.3. After decoupling the two, I added a new function to the geometry utilities class to obtain the refracted zenith angle at a specified depth. The fresnel transmission coefficients are still calculated at the surface.
 
 
-[3]  I added ```get_refracted_zenith_ray(ray,antenna_depth)``` as a helper function to obtain the refracted zenith angle of a source given a depth along a provided ray path. (The apparent zenith of the source as seen by the antenna). 
+[3]  I added ```get_refracted_zenith_ray(ray,antenna_depth)``` [Line](https://github.com/MatthewMarsee/NuRadioMC/blob/NuRadioMarsee/NuRadioReco/utilities/geometryUtilities.py#L26) as a helper function to obtain the refracted zenith angle of a source given a depth along a provided ray path. (The apparent zenith of the source as seen by the antenna). 
 
 
 ## Requirements
