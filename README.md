@@ -1,9 +1,11 @@
-
+## Intro
 This branch of NuRadioMC includes an updated version of NuRadioReco's Electric field reconstructor, using rays to obtain arrival time delays and refracted source zeniths at antenna depths, in place of the default model, which uses straight-line propagation.
 
 This is used as part of my RNO-G Solar Radio Burst Calibration (add link to repo here), so it is optimized for RNO-G, and assumes that the emission is a plane wave sweeping across the station (i.e. only a single ray path is necessary to model the propagation).
 
 * If you have any questions, issues or concerns, let me know! - Matthew Marsee
+
+## Descripttion of changes:
 
 The changes are made specifically in the following 3 scripts:
 
@@ -11,22 +13,19 @@ The changes are made specifically in the following 3 scripts:
 * [2] NuRadioReco/utilities/signal_processing.py
 * [3] NuRadioReco/utilities/geometryUtilities.py
 
-[1] 
+[1]  In ```get_array_of_channels(...)```
 
-In ```get_array_of_channels(...)```
 Replaced default generalized ice model (n(z<0) = 1.3) and straight-line propagation with a module that loads a previously generated ray to obtain proper arrival time delays between positions in the ice (typically antenna positions vs e-field location). This requires the ```rayReader``` class to use. I left a commented-out section as an alternative, that obtains the time delays from straight-line propagation using NuRadioMC's medium class. (Currently it is set to use a model of the greenlandic ice).
 
 In general, I also added an option for a passband when unfolding the antenna response from the voltage traces. This parameters is passed from the ```.run(...)``` method on line 220.
 
 
-[2] 
+[2]  In ```get_efield_antenna_factor(...)```
 
-In ```get_efield_antenna_factor(...)```
 Modified in script [1] to accept a ray path as an argument. Originally the same function was used to obtain the fresnel coefficients and the refracted source zenith at each antenna, since n(z<0)=1.3. After decoupling the two, I added a new function to the geometry utilities class to obtain the refracted zenith angle at a specified depth. The fresnel transmission coefficients are still calculated at the surface.
 
-[3]
 
-I added ```get_refracted_zenith_ray(ray,antenna_depth)``` as a helper function to obtain the refracted zenith angle of a source given a depth along a provided ray path. (The apparent zenith of the source as seen by the antenna). 
+[3]  I added ```get_refracted_zenith_ray(ray,antenna_depth)``` as a helper function to obtain the refracted zenith angle of a source given a depth along a provided ray path. (The apparent zenith of the source as seen by the antenna). 
 
 
 ## Requirements
@@ -36,8 +35,15 @@ If you want to use the ray functionality, you will need to use the rayReader cla
 ---
 ***
 # Original README
-***
 ---
+
+
+
+
+
+
+
+
 
 
 # NuRadioMC and NuRadioReco
